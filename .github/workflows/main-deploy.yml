@@ -55,7 +55,7 @@ jobs:
 
       - name: Executar testes
         run: |
-          dotnet test src/Edoha.Application/Edoha.Application.csproj --configuration Release --verbosity normal
+          dotnet test src/Edoha.Application/Edoha.Application.csproj --configuration Release --no-build --verbosity normal
           echo "✅ Testes executados com sucesso" >> $GITHUB_STEP_SUMMARY
         continue-on-error: true
 
