@@ -1,11 +1,13 @@
 ﻿using Edoha.Domain.Interfaces.Domain.Services;
 using Edoha.Domain.Models.DTOs.Page;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 
 namespace Edoha.Application.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
     public class PageController : ControllerBase
     {
         private readonly IPageService _pageService;
