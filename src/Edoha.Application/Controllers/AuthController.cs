@@ -2,6 +2,7 @@
 using Edoha.Domain.Models.DTOs.Auth;
 using Microsoft.AspNetCore.Mvc;
 using System.IdentityModel.Tokens.Jwt;
+using Microsoft.AspNetCore.Authorization;
 
 namespace Edoha.Application.Controllers
 {
@@ -17,6 +18,7 @@ namespace Edoha.Application.Controllers
         }
 
         [HttpPost]
+        [AllowAnonymous]
         public async Task<IActionResult> Autenticate([FromBody] CredentialsDTO credentials)
         {
             if (credentials != null)

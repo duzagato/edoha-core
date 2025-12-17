@@ -1,11 +1,13 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Edoha.Domain.Models.DTOs.UserType;
 using Edoha.Domain.Interfaces.Domain.Services;
+using Microsoft.AspNetCore.Authorization;
 
 namespace Edoha.Controllers
 {
     [ApiController]
     [Route("[controller]")]
+    [Authorize]
     public class UserTypeController : ControllerBase
     {
         private readonly IUserTypeService _userTypeService;

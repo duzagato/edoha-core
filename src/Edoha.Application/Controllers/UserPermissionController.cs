@@ -1,11 +1,13 @@
 ﻿using Edoha.Domain.Interfaces.Domain.Services;
 using Edoha.Domain.Models.DTOs.UserPermission;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 
 namespace Edoha.Application.Controllers
 {
     [ApiController]
     [Route("/[controller]")]
+    [Authorize]
     public class UserPermissionController : ControllerBase
     {
         private readonly IUserPermissionService _userPermissionService;

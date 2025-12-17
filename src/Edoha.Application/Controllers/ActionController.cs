@@ -7,6 +7,7 @@ namespace Edoha.Application.Controllers
 {
     [ApiController]
     [Route("/[controller]")]
+    [Authorize]
     public class ActionController : ControllerBase
     {
         private readonly IActionService _actionService;
