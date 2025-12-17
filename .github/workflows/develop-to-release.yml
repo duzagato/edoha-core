@@ -1,0 +1,142 @@
+name: 'Develop → Release'
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - develop
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create-release-branch:
+    if: |
+      github.event.pull_request.merged == true &&
+      (startsWith(github.event.pull_request.head.ref, 'feature/') || 
+       startsWith(github.event.pull_request.head.ref, 'fix/'))
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Configurar Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Status do Merge
+        run: |
+          echo "## ✅ Merge para develop concluído com sucesso" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch mergeada:** \`${{ github.event.pull_request.head.ref }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**PR:** #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Determinar tipo de versão
+        id: version-type
+        run: |
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          if [[ $BRANCH == feature/* ]]; then
+            echo "bump=minor" >> $GITHUB_OUTPUT
+            echo "type=feature" >> $GITHUB_OUTPUT
+          else
+            echo "bump=patch" >> $GITHUB_OUTPUT
+            echo "type=fix" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Criar version.txt se não existir
+        run: |
+          if [ ! -f version.txt ]; then
+            echo "0.1.0" > version.txt
+            git add version.txt
+            git commit -m "chore: create version.txt"
+            git push origin develop
+          fi
+
+      - name: Obter versão atual e calcular nova versão
+        id: version
+        run: |
+          CURRENT_VERSION=$(cat version.txt)
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          
+          IFS='.' read -r major minor patch <<< "$CURRENT_VERSION"
+          
+          if [ "${{ steps.version-type.outputs.bump }}" == "minor" ]; then
+            NEW_VERSION="$major.$((minor + 1)).0"
+          else
+            NEW_VERSION="$major.$minor.$((patch + 1))"
+          fi
+          
+          echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Versão atual: $CURRENT_VERSION → Nova versão: $NEW_VERSION" >> $GITHUB_STEP_SUMMARY
+
+      - name: Criar branch release
+        id: create-branch
+        run: |
+          RELEASE_BRANCH="release/v${{ steps.version.outputs.new }}"
+          git checkout -b "$RELEASE_BRANCH"
+          
+          # Atualizar version.txt
+          echo "${{ steps.version.outputs.new }}" > version.txt
+          
+          git add version.txt
+          git commit -m "chore: bump version to ${{ steps.version.outputs.new }}"
+          git push origin "$RELEASE_BRANCH"
+          
+          echo "branch=$RELEASE_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Build de validação
+        run: |
+          dotnet restore src/Edoha.Application/Edoha.Application.csproj
+          dotnet build src/Edoha.Application/Edoha.Application.csproj --configuration Release
+
+      - name: Criar PR para release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_BRANCH="${{ steps.create-branch.outputs.branch }}"
+          PR_TITLE="PR Gerada Automaticamente: develop -> $RELEASE_BRANCH"
+          
+          PR_BODY="## 🚀 Release v${{ steps.version.outputs.new }} (.NET API)
+          
+          Esta PR foi criada automaticamente após merge para \`develop\`.
+          
+          **Tipo de release:** \`${{ steps.version-type.outputs.type }}\`
+          **Versão anterior:** \`${{ steps.version.outputs.current }}\`
+          **Nova versão:** \`${{ steps.version.outputs.new }}\`
+          **Build:** ✅ Passou
+          
+          ---
+          
+          ### 📋 Mudanças incluídas
+          
+          - Branch mergeada: \`${{ github.event.pull_request.head.ref }}\`
+          - PR de origem: #${{ github.event.pull_request.number }}
+          
+          ---
+          
+          ### ✅ Checklist antes do merge
+          
+          - [x] Versão atualizada no version.txt
+          - [ ] Build Release executado com sucesso
+          - [ ] Testes passando
+          - [ ] Código revisado
+          - [ ] Pronto para produção
+          "
+          
+          gh pr create \
+            --title "$PR_TITLE" \
+            --body "$PR_BODY" \
+            --base develop \
+            --head "$RELEASE_BRANCH" \
+            --label "release"

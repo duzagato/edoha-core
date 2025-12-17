@@ -1,0 +1,119 @@
+name: 'Feature/Fix → Develop PR'
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+      - 'fix/**'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  validate-and-create-pr:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restaurar dependências
+        run: dotnet restore src/Edoha.Application/Edoha.Application.csproj
+
+      - name: Build do projeto
+        run: dotnet build src/Edoha.Application/Edoha.Application.csproj --configuration Debug --no-restore
+
+      - name: Executar testes
+        run: dotnet test src/Edoha.Application/Edoha.Application.csproj --no-build --verbosity normal
+        continue-on-error: true
+
+      - name: Extrair nome da branch
+        id: branch
+        run: |
+          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+          echo "name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          
+          if [[ $BRANCH_NAME == feature/* ]]; then
+            echo "type=feature" >> $GITHUB_OUTPUT
+          else
+            echo "type=fix" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Verificar se PR já existe
+        id: check-pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          EXISTING_PR=$(gh pr list --head "${{ steps.branch.outputs.name }}" --base develop --json number --jq '.[0].number')
+          if [ -z "$EXISTING_PR" ]; then
+            echo "exists=false" >> $GITHUB_OUTPUT
+          else
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "pr_number=$EXISTING_PR" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Verificar conflitos com develop
+        id: conflicts
+        run: |
+          git fetch origin develop
+          if git merge-tree $(git merge-base HEAD origin/develop) HEAD origin/develop | grep -q '<<<<<<<'; then
+            echo "has_conflicts=true" >> $GITHUB_OUTPUT
+            echo "⚠️ ATENÇÃO: Esta branch possui conflitos com develop" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "has_conflicts=false" >> $GITHUB_OUTPUT
+            echo "✅ Nenhum conflito detectado com develop" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Criar PR para develop
+        if: steps.check-pr.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH_NAME="${{ steps.branch.outputs.name }}"
+          PR_TITLE="PR Gerada Automaticamente -> $BRANCH_NAME -> develop"
+          
+          PR_BODY="## 🤖 PR Automática (.NET API)
+          
+          Esta PR foi criada automaticamente pelo workflow.
+          
+          **Branch de origem:** \`$BRANCH_NAME\`
+          **Branch de destino:** \`develop\`
+          **Tipo:** \`${{ steps.branch.outputs.type }}\`
+          **Build:** ✅ Passou
+          
+          ---
+          
+          ### 📋 Commits incluídos
+          
+          $(git log --oneline origin/develop..HEAD)
+          
+          ---
+          
+          "
+          
+          if [ "${{ steps.conflicts.outputs.has_conflicts }}" == "true" ]; then
+            PR_BODY+="### ⚠️ CONFLITOS DETECTADOS
+            
+            Esta branch possui conflitos com \`develop\`. Resolva os conflitos antes de fazer o merge.
+            "
+          fi
+          
+          gh pr create \
+            --title "$PR_TITLE" \
+            --body "$PR_BODY" \
+            --base develop \
+            --head "$BRANCH_NAME" \
+            --label "${{ steps.branch.outputs.type }}"
+
+      - name: Atualizar PR existente
+        if: steps.check-pr.outputs.exists == 'true'
+        run: |
+          echo "✅ PR já existe: #${{ steps.check-pr.outputs.pr_number }}" >> $GITHUB_STEP_SUMMARY

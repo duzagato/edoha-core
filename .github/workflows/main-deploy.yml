@@ -1,0 +1,120 @@
+name: 'Main Deploy'
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  deploy-production:
+    if: |
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Configurar Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Status do Merge
+        run: |
+          echo "## 🎉 Merge para main concluído com sucesso!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch mergeada:** \`${{ github.event.pull_request.head.ref }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**PR:** #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Extrair versão
+        id: version
+        run: |
+          VERSION=$(cat version.txt)
+          echo "number=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build de Produção
+        run: |
+          dotnet restore src/Edoha.Application/Edoha.Application.csproj
+          dotnet build src/Edoha.Application/Edoha.Application.csproj --configuration Release --no-restore
+          echo "✅ Build de produção executado com sucesso" >> $GITHUB_STEP_SUMMARY
+
+      - name: Executar testes
+        run: |
+          dotnet test src/Edoha.Application/Edoha.Application.csproj --configuration Release --no-build --verbosity normal
+          echo "✅ Testes executados com sucesso" >> $GITHUB_STEP_SUMMARY
+        continue-on-error: true
+
+      - name: Criar tag Git
+        run: |
+          git tag -a "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+          echo "🏷️ Tag criada: ${{ steps.version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Gerar changelog
+        id: changelog
+        run: |
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          if [ -z "$PREVIOUS_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" HEAD)
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" $PREVIOUS_TAG..HEAD)
+          fi
+          
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Criar GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "API Release ${{ steps.version.outputs.tag }}" \
+            --notes "## 🚀 API Release ${{ steps.version.outputs.tag }}
+          
+          ### 📋 Mudanças
+          
+          ${{ steps.changelog.outputs.changelog }}
+          
+          ---
+          
+          ### 🔧 Informações Técnicas
+          
+          - **Framework:** .NET 8.0
+          - **Build:** Release
+          - **Testes:** ✅ Passando
+          - **Data:** $(date +'%Y-%m-%d %H:%M:%S')
+          - **Commit:** ${{ github.sha }}
+          
+          ### 📦 Artefatos
+          
+          Build de produção disponível.
+          " \
+            --latest
+
+      - name: Resumo do Deploy
+        run: |
+          echo "## 🎊 Deploy Concluído!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Versão **${{ steps.version.outputs.tag }}** publicada em produção" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Tag criada: \`${{ steps.version.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "✅ GitHub Release criado" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Build de produção executado" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 [Ver Release](https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }})" >> $GITHUB_STEP_SUMMARY

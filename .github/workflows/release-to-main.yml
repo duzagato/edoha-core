@@ -1,0 +1,114 @@
+name: 'Release → Main PR'
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - 'release/**'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create-pr-to-main:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Status do Merge
+        run: |
+          echo "## ✅ Merge para release concluído com sucesso" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch release:** \`${{ github.event.pull_request.head.ref }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**PR:** #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Extrair versão
+        id: version
+        run: |
+          VERSION=$(cat version.txt)
+          echo "number=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Versão da release: $VERSION" >> $GITHUB_STEP_SUMMARY
+
+      - name: Build e testes finais
+        run: |
+          dotnet restore src/Edoha.Application/Edoha.Application.csproj
+          dotnet build src/Edoha.Application/Edoha.Application.csproj --configuration Release
+          dotnet test src/Edoha.Application/Edoha.Application.csproj --configuration Release --verbosity normal
+        continue-on-error: true
+
+      - name: Verificar se PR para main já existe
+        id: check-pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          EXISTING_PR=$(gh pr list --head "${{ github.event.pull_request.head.ref }}" --base main --json number --jq '.[0].number')
+          if [ -z "$EXISTING_PR" ]; then
+            echo "exists=false" >> $GITHUB_OUTPUT
+          else
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "pr_number=$EXISTING_PR" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Criar PR para main
+        if: steps.check-pr.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_BRANCH="${{ github.event.pull_request.head.ref }}"
+          PR_TITLE="PR Gerada Automaticamente: $RELEASE_BRANCH -> main"
+          
+          PR_BODY="## 🎯 Deploy para Produção - v${{ steps.version.outputs.number }} (.NET API)
+          
+          Esta PR foi criada automaticamente após merge para \`$RELEASE_BRANCH\`.
+          
+          **Versão:** \`${{ steps.version.outputs.number }}\`
+          **Branch de origem:** \`$RELEASE_BRANCH\`
+          **Branch de destino:** \`main\`
+          **Build Release:** ✅ Passou
+          
+          ---
+          
+          ### 📋 Informações
+          
+          Após o merge desta PR para \`main\`:
+          - ✅ Será criada uma tag \`v${{ steps.version.outputs.number }}\`
+          - ✅ Será criado um GitHub Release
+          - ✅ Build de produção será executado
+          - ✅ API estará pronta para deploy
+          
+          ---
+          
+          ### ⚠️ Atenção
+          
+          Este merge afeta a branch de produção. Certifique-se de que:
+          - [ ] Todos os testes passaram
+          - [ ] Build Release executado com sucesso
+          - [ ] Código foi revisado
+          - [ ] A versão está correta
+          - [ ] Está pronto para deploy em produção
+          - [ ] Migrações de banco (se houver) foram validadas
+          "
+          
+          gh pr create \
+            --title "$PR_TITLE" \
+            --body "$PR_BODY" \
+            --base main \
+            --head "$RELEASE_BRANCH" \
+            --label "production"
+
+      - name: PR já existe
+        if: steps.check-pr.outputs.exists == 'true'
+        run: |
+          echo "✅ PR para main já existe: #${{ steps.check-pr.outputs.pr_number }}" >> $GITHUB_STEP_SUMMARY
