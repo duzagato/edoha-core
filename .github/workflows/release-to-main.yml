@@ -44,8 +44,8 @@ jobs:
       - name: Build e testes finais
         run: |
           dotnet restore src/Edoha.Application/Edoha.Application.csproj
-          dotnet build src/Edoha.Application/Edoha.Application.csproj --configuration Release
-          dotnet test src/Edoha.Application/Edoha.Application.csproj --configuration Release --verbosity normal
+          dotnet build src/Edoha.Application/Edoha.Application.csproj --configuration Release --no-restore
+          dotnet test src/Edoha.Application/Edoha.Application.csproj --configuration Release --no-build --verbosity normal
         continue-on-error: true
 
       - name: Verificar se PR para main já existe
